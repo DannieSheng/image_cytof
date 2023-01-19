@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+
+{% block title %}
+Image Cytof
+{% endblock %}
+
+{% block head %}
+    {{ super() }}
+{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div class="text">
+  <h2>Welcome to use Image Cytof</h2>
+  <h5>Start by selecting a pipeline</h5>
+  </div>
+
+  <div class="buttons">
+
+  <!--<span class="float-right">
+    <a class="btn" href="{{ url_for('single') }}">Single Image Pipeline</a>
+  </span> -->
+
+  <input type="submit" value="Single Image Pipeline" id="singleImg" onclick="singleSelect();">
+    
+    <!--<div class="msgSuccess" id="msgSingleSelect">
+      <a class="btn" href="{{ url_for('single') }}">Single Image Pipeline from raw data</a>
+      <a class="btn" href="{{ url_for('single_obj') }}">Single Image Pipeline from presaved CytofImage Object</a>
+    </div> -->
+
+    <div class="msgSuccess" id="msgSingleSelect">
+      <button class="accordion" id="accordion-SingleSelect"><span id="msg-button-SingleSelect"></span></button>
+      <div class="panel">
+<!--        <a href="{{ url_for('single') }}">Single Image Pipeline from raw data</a><br>-->
+<!--        <a href="{{ url_for('single_obj') }}">Single Image Pipeline from presaved CytofImage Object</a>-->
+        <form method="POST" action="{{ url_for('single') }}">
+          <input type="submit" value="Single Image Pipeline from raw data">
+        </form>
+        <form method="POST" action="{{ url_for('single_obj') }}">
+          <input type="submit" value="Single Image Pipeline from pre-saved CytofImage Object">
+        </form>
+      </div>
+    </div>
+
+
+
+
+  <span class="float-right">
+    <a class="btn" href="{{ url_for('cohort') }}">Cohort Pipeline</a>
+  </span>
+
+</div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,234 @@
+{% extends 'base.html' %}
+
+{% block head %}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Cytof Single Image</title>
+    <link rel="icon" href="{{ url_for('static', filename='qbrc.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" type="text/css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.1/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-+0n0xVW2eSR5OomGNYDnhzAbDsOXxcvSN1TPprVMTNDbiYZCxYbOOl7+AMvyTG2x" crossorigin="anonymous">
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+    <script src="{{ url_for('static', filename='main_single_obj.js') }}"></script>
+    <script src="{{ url_for('static', filename='main_single.js') }}"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script> 
+    <title>{% block title %}Single Image Pipeline (from saved object){% endblock %}</title>
+  {% endblock %}
+
+
+{% block content %}
+<h2>Single Image Pipeline (from saved object)</h2>
+{% with messages = get_flashed_messages() %}
+  {% if messages %}
+    {% for message in messages %}
+      <div class="alert">{{ message }}</div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<hr>
+
+<div class="main-container">
+  <div id="set-saving-dir">  
+    <label for="directory">Enter saving directory (You may want to set it to the directory of the CytofImage file)</label>
+    <input type="text" name="directory" id="directory" value="./output">
+    <input type="submit" name="set" value="Set" onclick="dirSet();">
+    <div class="msgSuccess" id="msg-set">
+       <p>Results will be saved here: <span id="msg-dir"></span>.
+    </div>
+  </div>
+  <br><br>
+   <hr>
+  
+  <div id="upload-file">
+    <label for="file">Choose CytofImage file to upload</label>
+    <input type="file" name="file" id="file">
+    <input type="submit" name="file" value="Upload" onclick="objUpload();">
+    <div class="msgSuccess" id="msg-upload">
+      <p><span id="msg-file"></span> uploaded successfully!</p>
+    </div>
+  </div>
+
+  <hr>
+
+  <div id="read-data">
+      <input type="submit" name="read_data" value="Read data" onclick="objRead();">
+      <div class="msgSuccess" id="msg-read">
+        <button class="accordion" id="accordion-1"><span id="msg-button-save"></span></button>
+        <div class="panel">
+          <p>Successfully read presaved CytofImage object.<br>
+            <p>Saving directory for this image: <span id="save-dir"></span>.</p>
+            Markers: <span id="markers-ori"></span>.<br>
+            Channels: <span id="channels-ori"></span>.<br>
+          </p>
+        </div>
+      </div>
+  </div>
+
+
+  <hr>
+
+  <div id="check-channels">
+    <input type="submit" name="check_channels" value="Check channels" onclick="channelCheck();">
+    <div class="msgSuccess" id="msg-check-channels">
+      <button class="accordion" id="accordion-2"><span id="msg-button-check"></span></button>
+      <div class="panel">
+        <p>Also check the saved figure here: <span id="save-channels"></span></p>
+        <img id="fig-channels" src="" width="800" height="1200">
+      </div>
+    </div>
+  </div>
+
+  <hr>
+
+  <div id="visualize-channels">
+    <p>Please select channel(s) to be visualized (max 6)</p>
+  </div>
+
+  <hr>
+
+  <div id="remove-channels">
+    <p>Please select channel(s) to be removed (if any)</p>
+    <p>Hold down the Ctrl (windows) / Command (Mac) button to select multiple options.</p>
+    <select width=300 name="selectRemoveChannels" id="selectRemoveChannels" style="width: 350px" size="8" multiple>
+    </select>
+    <input type="submit" name="commit-remove" value="Submit" onclick="channelRemove();">
+
+    <div class="msgSuccess" id="msgRemove">
+      <button class="accordion" id="accordion-rm"><span id="msg-button-rm"></span></button>
+      <div class="panel">
+        <p>Updated channels: <br><span id="channelsRemove"></span>.</p>
+        <p>(The plots for channels are also updated accordingly)</p>
+      </div>
+    </div>
+  </div>
+
+  <hr>    
+
+  <div id="define-channels">
+    <p>Define new channel(s) by:
+    <br>1) Type name for the new channel
+    <br>2) Select channel(s) to be combined to define this new channel</p>
+    <label for="newChannel">Channel Name</label>
+    <input type="text" id="newChannel" value="nuclei">
+    <select width=300 id="selectDefineChannels" style="width: 350px" size="8" multiple>
+    </select>
+    <input type="submit" value="Add" id="defineAdd" onclick="channelDefineAdd();">
+    <input type="submit" value="Finish" onclick="channelDefineFinish();">
+
+    <div class="msgSuccess" id="msgAdd">
+      <span id=""></span>
+    </div>
+
+    <div class="msgSuccess" id="msgDefine">
+      <button class="accordion" id="accordion-df"><span id="msg-button-df"></span></button>
+      <div class="panel">
+        <p>Updated channels: <span id="channelsDefine"></span>.</p>
+      </div>
+    </div>
+  </div>
+
+  <hr>    
+
+  <div id="cell segmentation">
+    <input type="checkbox" id="seg-membrane" value="use-membrane">
+    <label for="seg-membrane">Use Membrane</label>
+    <br>
+    <label for="cellSegR">Please enter the desired radius for cell segmentation. </label>
+    <input type="text" id="cellSegR" value="5">
+    <input type="submit" value="Segment" id="cellSeg" onclick="cellSeg();">
+
+    <div class="msgSuccess" id="msgSeg">
+      <button class="accordion" id="accordion-seg"><span id="msg-button-seg"></span></button>
+      <div class="panel">
+        <img id="fig-seg" src="" width="800" height="500">
+      </div>
+    </div>
+  </div>
+
+  <hr>  
+
+
+  <div id="feature extraction">
+    <input type="submit" value="Extract Feature" id="featExtract" onclick="featExtract();">
+    <div class="msgSuccess" id="msgExtract">
+      <p>Feature extraction finished.</p>
+    </div>
+  </div>
+
+  <hr>
+
+  <div id="PhenoGraph clustering">
+    <input type="submit" value="PhenoGraph Clustering Analysis" id="PhenoGraph" onclick="PhenoGraph();">
+
+    <div class="msgSuccess" id="msgPG">
+      <button class="accordion" id="accordion-PG"><span id="msg-button-PG"></span></button>
+      <div class="panel">
+        <p>PhenoGraph clustering finished. <span id="n-PG"></span> clusters found</p>
+
+        <p>Visualization of clusters and protein expressions</p>
+        <img id="fig-PG" src="" width="1500" height="500">
+
+        <br>
+        <p>Visualization with the original image</p>
+        <img id="fig-colortable" src="">
+        <br>
+        <img id="fig-PG-og" src="" width="1300" height="500">
+      </div>
+    </div>
+  </div>
+
+  <hr>
+
+  <div id="Marker positive">
+    <p>Marker Positive Analysis</p>
+    <div class="dropdown">
+      <input type="submit" class="dropbtn" value="Select marker to show analysis" id="MarkerPos" onclick="showDropdown();">
+
+      <div id="markerPosDropDown" class="dropdown-content">
+        <input type="text" placeholder="Search.." id="myInput" onkeyup="filterFunction()">
+        <select width=300 name="selectMPmarker" id="selectMPmarker" style="width: 350px" size="8">
+        </select>
+      </div>
+
+    </div>
+
+    <input type="submit" name="commit-marker-pos" value="Marker Positive Anslysis" onclick="MarkerPos();">
+    <div class="msgSuccess" id="msgMarkerPos">
+      <button class="accordion" id="accordion-MP"><span id="msg-button-MP"></span></button>
+      <div class="panel">
+        <p>Visualization of Marker positive nuclei (and cells) shown with original image</p>
+        <img id="fig-MP" src="" width="1300" height="500">
+      </div>
+    </div>
+</div>
+{% endblock %}
+
+
+  <!-- TODO: move to main.js -->
+<!-- In HTML javascript -->
+<!-- <script>
+  var acc = document.getElementsByClassName("accordion");
+  var i;
+  for (i = 0; i < acc.length; i++) {
+    acc[i].addEventListener("click", function() {
+      /* Toggle between adding and removing the "active" class,
+      to highlight the button that controls the panel */
+      this.classList.toggle("active");
+
+      /* Toggle between hiding and showing the active panel */
+      var panel = this.nextElementSibling;
+      if (panel.style.display === "block") {
+        panel.style.display = "none";
+      } else {
+        panel.style.display = "block";
+      }
+
+      // Animated Accordion (slide down)
+      // if (panel.style.maxHeight) {
+      //   panel.style.display = null;
+      // } else {
+      //   panel.style.maxHeight = panel.scrollHeight + "px";
+      // }
+    });
+  }
+</script> -->
