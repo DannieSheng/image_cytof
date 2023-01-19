@@ -1,0 +1,14 @@
+*.pyc
+test_out/
+output/
+test_data
+**/.ipynb_checkpoints
+__pycache__
+*~
+*~*
+*discard*
+**/__pycache__
+notebooks/.ipynb_checkpoints*
+.DS_Store
+.idea/*
+*archive*
