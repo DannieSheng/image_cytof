@@ -2,30 +2,99 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from classes import CytofImage
+import pathlib
+import skimage.io as skio
 import warnings
+from typing import Union, Optional, Type, Tuple, List
+# from readimc import MCDFile
 
+# from classes import CytofImage, CytofImageTiff
+from cytof.classes import CytofImage, CytofImageTiff
 
 ####################### Read data ########################
-def cytof_read_data(filename, slide="", roi=None):
+def cytof_read_data_roi(filename, slide="", roi=None, iltype="hwd"):
     """ Read cytof data (.txt file) as a dataframe
-    
+
     Inputs:
-        filename = full filename of the cytof data
-        
-    Returns: 
+        filename = full filename of the cytof data (path-name-ext)
+
+    Returns:
         df_cytof = dataframe of the cytof data
-        
+
     :param filename: str
     :return df_cytof: pandas.core.frame.DataFrame
     """
-    df_cytof = pd.read_table(filename)
-    if roi is None:
-        roi = os.path.basename(filename).split('.txt')[0]
+    ext = pathlib.Path(filename).suffix
+    assert len(ext) > 0, "Please provide a full file name with extension!"
+    assert ext.upper() in ['.TXT', '.TIFF'], "filetypes other than '.txt' or '.tiff' not supported now!"
 
-    # initialize an instance of CytofImage
-    cytof_img = CytofImage(df_cytof, slide=slide, roi=roi, filename=filename)
+    if ext == '.txt':
+        df_cytof = pd.read_table(filename)
+        if roi is None:
+            roi = os.path.basename(filename).split('.txt')[0]
+        # initialize an instance of CytofImage
+        cytof_img = CytofImage(df_cytof, slide=slide, roi=roi, filename=filename)
+
+    elif ext == '.tiff':
+        image = skio.imread(filename, plugin="tifffile")
+        if iltype != "hwd":
+            image = image.transpose(np.argsort(['hwd'.index(x) for x in iltype]))
+        cytof_img = CytofImageTiff(image, slide="", roi="", filename="")
     return cytof_img
+
+def cytof_read_data_mcd(filename, verbose=False):
+    # slides = {}
+    cytof_imgs = {}
+    with MCDFile(filename) as f:
+        if verbose:
+            print("\n{}, \n\t{} slides, showing the 1st slide:".format(filename, len(f.slides)))
+
+        ## slide
+        for slide in f.slides:
+            if verbose:
+                print("\tslide ID: {}, description: {}, width: {} um, height: {}um".format(
+                slide.id,
+                slide.description,
+                slide.width_um,
+                slide.height_um)
+            )
+            # slides[slide.id] = {}
+            # read the slide image
+            im_slide = f.read_slide(slide)  # numpy array or None
+            if verbose:
+                print("\n\tslide image shape: {}".format(im_slide.shape))
+
+            # (optional) read the first panorama image
+            panorama = slide.panoramas[0]
+            if verbose:
+                print(
+                "\t{} panoramas, showing the 1st one. \n\tpanorama ID: {}, description: {}, width: {} um, height: {}um".format(
+                    len(slide.panoramas),
+                    panorama.id,
+                    panorama.description,
+                    panorama.width_um,
+                    panorama.height_um)
+            )
+            im_pano = f.read_panorama(panorama)  # numpy array
+            if verbose:
+                print("\n\tpanorama image shape: {}".format(im_pano.shape))
+
+            for roi in slide.acquisitions: # for each acquisition (roi)
+                im_roi = f.read_acquisition(roi)  # array, shape: (c, y, x), dtype: float32
+                if verbose:
+                    print("\troi {}, shape: {}".format(roi.id, img_roi.shape))
+#                 slides[slide.id][roi.id] = {
+#                     "channel_names": roi.channel_names,
+#                     "channel_labels": roi.channel_labels,
+#                     "image": im_roi
+#                 }
+                cytof_img = CytofImageTiff(image=im_roi.transpose((1,2,0)),
+                                           slide=slide.id,
+                                           roi=roi.id,
+                                           filename=raw_f)
+                cytof_img.set_channels(roi.channel_names, roi.channel_labels)
+                cytof_imgs["{}_{}".format(slide.id, roi.id)] = cytof_img
+    return cytof_imgs# slides
 
 
 def cytof_preprocess(df):
@@ -156,7 +225,12 @@ def cytof_txt2img(df, marker_names):
     return out_image
 
 
-def cytof_merge_channels(im_cytof, channel_names, channel_ids=None, channels=None, quantiles=None, visualize=False):
+def cytof_merge_channels(im_cytof: np.ndarray,
+                         channel_names: List,
+                         channel_ids:List = None,
+                         channels: List = None,
+                         quantiles: List = None,
+                         visualize: bool = False):
     """ Merge selected channels (given by "channel_ids") of raw cytof image and generate a RGB image
 
     Inputs:

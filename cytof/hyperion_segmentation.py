@@ -1,11 +1,13 @@
 import scipy
 import skimage
 from skimage import feature
-from segmentation_functions import generate_mask, normalize
 import numpy as np
 import matplotlib.pyplot as plt
 from skimage.color import label2rgb
 from skimage.segmentation import mark_boundaries
+
+# from segmentation_functions import generate_mask, normalize
+from cytof.segmentation_functions import generate_mask, normalize
 
 
 def cytof_nuclei_segmentation(im_nuclei, show_process=False, size_hole=50, size_obj=7,
@@ -314,7 +316,7 @@ def visualize_segmentation(raw_image, channels, seg, channel_ids, bound_color=(1
     :param show: bool
     :return marked_image
     """
-    from hyperion_preprocess import cytof_merge_channels
+    from cytof.hyperion_preprocess import cytof_merge_channels
     marked_image = mark_boundaries(cytof_merge_channels(raw_image, channels, channel_ids)[0],
                                    seg, mode=bound_mode, color=bound_color, background_label=bg_label)
     if show:

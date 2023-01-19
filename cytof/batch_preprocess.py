@@ -12,9 +12,9 @@ import skimage
 
 import sys
 sys.path.append('../cytof')
-from hyperion_preprocess import cytof_read_data
+from hyperion_preprocess import cytof_read_data_roi
 from hyperion_analysis import batch_scale_feature
-from classes import _save_multi_channel_img
+from utils import save_multi_channel_img
 
 def makelist(string):
     delim = ','
@@ -58,6 +58,7 @@ def main(args):
     params_ROI   = yaml.load(open(args.params_ROI, "rb"), Loader=yaml.Loader)
     channel_dict = params_ROI["channel_dict"]
     channels_remove = params_ROI["channels_remove"]
+    quality_control_thres = params_ROI["quality_control_thres"]
 
     # name of the batch and saving directory
     cohort_name = os.path.basename(args.cohort_file).split('.csv')[0]
@@ -110,24 +111,22 @@ def main(args):
 
         ## 1) Read and preprocess data
         # read data: file name -> dataframe
-        cytof_img = cytof_read_data(f_roi, slide, roi)
+        cytof_img = cytof_read_data_roi(f_roi, slide, roi)
 
         # quality control section
-        H = max(cytof_img.df['Y'].values) + 1
-        W = max(cytof_img.df['X'].values) + 1
-        if (H < args.quality_control_thres) or (W < args.quality_control_thres):
-            print("At least one dimension of the image {}-{} is smaller than {}, skipping" \
-                  .format(cytof_img.slide, cytof_img.roi, args.quality_control_thres))
-            # df_bad_rois = df_bad_rois.append({"Slide": slide,
-            #                     "ROI": roi,
-            #                     "path": pth_i,
-            #                     "size (W*H)": (W,H)},
-            #                    ignore_index=True)
+        cytof_img.quality_control(thres=quality_control_thres)
+        if not cytof_img.keep:
+            H = max(cytof_img.df['Y'].values) + 1
+            W = max(cytof_img.df['X'].values) + 1
+        # if (H < args.quality_control_thres) or (W < quality_control_thres):
+        #     print("At least one dimension of the image {}-{} is smaller than {}, skipping" \
+        #           .format(cytof_img.slide, cytof_img.roi, quality_control_thres))
+
             df_bad_rois = pd.concat([df_bad_rois,
-                                     pd.Series({"Slide": slide,
+                                     pd.DataFrame.from_dict([{"Slide": slide,
                                       "ROI": roi,
                                       "path": pth_i,
-                                      "size (W*H)": (W,H)}, index=[0]).to_frame()])
+                                      "size (W*H)": (W,H)}])])
             continue
 
         if args.save_channel_images:
@@ -161,9 +160,9 @@ def main(args):
 
         ## 2) nuclei & membrane channels and visualization
         cytof_img.define_special_channels(channel_dict)
-
-        #### Dataframe -> raw image
-        cytof_img.get_image()
+        assert len(cytof_img.channels) == cytof_img.image.shape[-1]
+        # #### Dataframe -> raw image
+        # cytof_img.get_image()
 
         ## (optional): save channel images
         if args.save_channel_images:
@@ -177,11 +176,11 @@ def main(args):
                                                  show_process=args.show_seg_process)
         if args.save_seg_vis:
             marked_image_nuclei = cytof_img.visualize_seg(segtype="nuclei", show=False)
-            _save_multi_channel_img(skimage.img_as_ubyte(marked_image_nuclei[0:100, 0:100, :]),
+            save_multi_channel_img(skimage.img_as_ubyte(marked_image_nuclei[0:100, 0:100, :]),
                                     os.path.join(dir_seg_vis, "{}_{}_nuclei_seg.png".format(slide, roi)))
 
             marked_image_cell = cytof_img.visualize_seg(segtype="cell", show=False)
-            _save_multi_channel_img(skimage.img_as_ubyte(marked_image_cell[0:100, 0:100, :]),
+            save_multi_channel_img(skimage.img_as_ubyte(marked_image_cell[0:100, 0:100, :]),
                                     os.path.join(dir_seg_vis, "{}_{}_cell_seg.png".format(slide, roi)))
 
         ## 4) Feature extraction
@@ -218,6 +217,7 @@ def main(args):
                              index=False)
             if seen == 0:
                 dfs_scale_params[q] = df_normed[s_features]
+                dict_quantiles = cytof_img.dict_quantiles
             else:
                 # dfs_scale_params[q] = dfs_scale_params[q].append(df_normed[s_features], ignore_index=True)
                 dfs_scale_params[q] = pd.concat([dfs_scale_params[q], df_normed[s_features]])
@@ -233,20 +233,15 @@ def main(args):
         #                       "path": pth_i,
         #                       "output_file": out_file}, ignore_index=True)
         df_io = pd.concat([df_io,
-                           # pd.DataFrame({"Slide": slide,
-                           #  "ROI": roi,
-                           #  "path": pth_i,
-                           #  "output_file": os.path.abspath(out_file) # use absolute path
-                           #  }, index=[0])
-                           pd.Series({"Slide": slide,
+                           pd.DataFrame.from_dict([{"Slide": slide,
                             "ROI": roi,
                             "path": pth_i,
                             "output_file": os.path.abspath(out_file) # use absolute path
-                            }).to_frame()
+                            }])
                            ])
 
 
-    for q in cytof_img.dict_quantiles.keys():
+    for q in dict_quantiles.keys():
         df_scale_params = dfs_scale_params[q].mean().to_frame(name="mean").transpose()
         # df_scale_params = df_scale_params.append(dfs_scale_params[q].std().to_frame(name="std").transpose(),
         #                                          ignore_index=True)

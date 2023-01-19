@@ -2,7 +2,7 @@ import os
 import re
 import glob
 import pickle as pkl
-import scipy
+
 import copy
 import numpy as np
 import pandas as pd
@@ -11,15 +11,22 @@ from matplotlib.pyplot import cm
 import warnings
 from tqdm import tqdm
 import skimage
-from sklearn.mixture import GaussianMixture
+
 import phenograph
 import umap
 import seaborn as sns
-
-import hyperion_preprocess as pre
-import hyperion_segmentation as seg
-from classes import load_saved_CytofImage
 from scipy.stats import spearmanr
+
+# import hyperion_preprocess as pre
+# import hyperion_segmentation as seg
+# from utils import load_CytofImage
+
+from cytof import hyperion_preprocess as pre
+from cytof import hyperion_segmentation as seg
+from cytof.utils import load_CytofImage
+
+
+
 
 
 def _longest_substring(str1, str2):
@@ -140,8 +147,8 @@ def check_feature_distribution(feature_summary_df, features):
     """
 
     for feature in features:
-        fig, ax = plt.subplots(1, 1, figsize=(3,2))
         print(feature)
+        fig, ax = plt.subplots(1, 1, figsize=(3, 2))
         ax.hist(np.log2(feature_summary_df[feature] + 0.0001), 100)
         ax.set_xlim(-15, 15)
         plt.show()
@@ -227,60 +234,7 @@ def feature_scaling(feature_summary_df, features, inplace=False):
 
 
 
-def _get_thresholds(feature_summary_df, features, visualize=True, verbose=False):
-    """Calculate thresholds for each feature by assuming a Gaussian Mixture Model
-    Inputs:
-        feature_summary_df = dataframe of extracted feature summary
-        features           = a list of features to calculate thresholds from
-        visualize          = a flag indicating whether or not visualize the feature distributions and thresholds.
-                            (Default=True)
-        verbose            = a flag indicating whether or not print calculated values on screen. (Default=False)
-    Outputs:
-        thresholds         = a dictionary of calculated threshold values
-    :param feature_summary_df: pandas.core.frame.DataFrame
-    :param features: list
-    :param visualize: bool
-    :param verbose: bool
-    :return thresholds: dict
-    """
-    thresholds = {}
-    for f, feat_name in enumerate(features):
-        X = feature_summary_df[feat_name].values.reshape(-1, 1)
-        gm = GaussianMixture(n_components=2, random_state=0, n_init=2).fit(X)
-        mu = np.min(gm.means_[gm.weights_ > 0.3])
-        which_component = np.argmax(gm.means_ == mu)
 
-        if verbose:
-            print(f"GMM mean values: {gm.means_}")
-            print(f"GMM weights: {gm.weights_}")
-            print(f"GMM covariances: {gm.covariances_}")
-
-        X = feature_summary_df[feat_name].values
-        hist = np.histogram(X, 150)
-        sigma = np.sqrt(gm.covariances_[which_component, 0, 0])
-        background_ratio = gm.weights_[which_component]
-        thres = sigma * 2.5 + mu
-        thresholds[feat_name] = thres
-
-        n = sum(X > thres)
-        percentage = n / len(X)
-
-        # visualize
-        if visualize:
-            fig, ax = plt.subplots(1, 1)
-            ax.hist(X, 150, density=True)
-            ax.set_xlabel("log2({})".format(feat_name))
-            ax.plot(hist[1], scipy.stats.norm.pdf(hist[1], mu, sigma) * background_ratio, c='red')
-            ax.axvline(x=thres, c='red')
-            ax.text(0.7, 0.9, "n={}, percentage={}".format(n, np.round(percentage, 3)), ha='center', va='center',
-                    transform=ax.transAxes)
-            ax.text(0.3, 0.9, "mu={}, sigma={}".format(np.round(mu, 2), np.round(sigma, 2)), ha='center', va='center',
-                    transform=ax.transAxes)
-            ax.text(0.3, 0.8, "background ratio={}".format(np.round(background_ratio, 2)), ha='center', va='center',
-                    transform=ax.transAxes)
-            ax.set_title(feat_name)
-            plt.show()
-    return thresholds
 
 
 def generate_summary(feature_summary_df, features, thresholds):
@@ -646,7 +600,7 @@ def _gather_roi_expressions(df_io, normqs=[75]):
     for roi in df_io["ROI"].unique():
         expressions[roi] = []
         f_cytof_im = df_io.loc[df_io["ROI"] == roi, "output_file"].values[0]
-        cytof_im = load_saved_CytofImage(f_cytof_im)
+        cytof_im = load_CytofImage(f_cytof_im)
         for feature_name in cytof_im.features['cell_sum']:
             expressions[roi].extend(cytof_im.df_feature[feature_name])
         expressions_normed[roi] = dict((q, {}) for q in normqs)
@@ -692,52 +646,6 @@ def visualize_normalization(df_slide_roi, normqs=[75], level="slide"):
     return expressions, expressions_normed
 
 
-def _vis_cell_phenotypes(df_feat, communities, n_community, markers, list_features, accumul_type="sum", savedir=None):
-    """ Visualize cell phenotypes for a given dataframe of feature
-    Args:
-        df_feat: a dataframe of features
-        communities: a list of communities (can be a subset of the cohort communities, but should be consistent with df_feat)
-        n_community: number of communities in the cohort (n_community >= number of unique values in communities)
-        markers: a list of markers used in CyTOF image (to be present in the heatmap visualization)
-        list_features: a list of feature names (consistent with columns in df_feat)
-        accumul_type: feature aggregation type, choose from "sum" and "ave" (default="sum")
-        savedir: results saving directory. If not None, visualization plots will be saved in the desired directory (default=None)
-    Returns:
-        cell_cluster: a (N, M) matrix, where N = # of clustered communities, and M = # of markers
-
-        cell_cluster_norm: the normalized form of cell_cluster (normalized by subtracting the median value)
-    """
-    assert accumul_type in ["sum", "ave"], "Wrong accumulation type! Choose from 'sum' and 'ave'!"
-    cell_cluster= np.zeros((n_community, len(markers)))
-    for cluster in range(len(np.unique(communities))):
-        df_sub = df_feat[communities == cluster]
-        if df_sub.shape[0] == 0:
-            continue
-        # for each feature in the list of features
-        for i, feat in enumerate(list_features):
-            cell_cluster[cluster, i] = np.average(df_sub[feat])
-    cell_cluster_norm = cell_cluster - np.median(cell_cluster, axis=0)
-    sns.heatmap(cell_cluster - np.median(cell_cluster, axis=0),#cell_cluster_,
-                cmap='magma',
-                xticklabels=markers,
-                yticklabels=np.arange(len(np.unique(communities)))
-               )
-    plt.xlabel("Markers")
-    plt.ylabel("Phenograph clusters")
-    fname = "phenoclusters"
-    if accumul_type == "sum":
-        plt.title("normalized expression - cell sum")
-        fname += "-cell_sum.png"
-    elif accumul_type == "ave":
-        plt.title("normalized expression - cell average")
-        fname += "-cell_ave.png"
-    if savedir is not None:
-        if not os.path.exists(savedir):
-            os.makedirs(savedir)
-        plt.savefig(os.path.join(savedir, fname))
-    plt.show()
-    return cell_cluster, cell_cluster_norm
-
 ###########################################################
 ############# marker level analysis functions #############
 ###########################################################
@@ -757,7 +665,7 @@ def _gather_roi_co_exp(df_slide_roi, outdir, feat_name, accumul_type):
         if not f_cytof_im in os.listdir(os.path.join(outdir, "cytof_images")):
             print("{} not found, skip".format(f_cytof_im))
             continue
-        cytof_im   = load_saved_CytofImage(os.path.join(outdir, "cytof_images", f_cytof_im)) 
+        cytof_im   = load_CytofImage(os.path.join(outdir, "cytof_images", f_cytof_im))
         df_feat = getattr(cytof_im, n_attr)
 
         if seen_roi == 0:
@@ -908,7 +816,7 @@ def _gather_roi_corr(df_slide_roi, outdir, feat_name, accumul_type):
         if not f_cytof_im in os.listdir(os.path.join(outdir, "cytof_images")):
             print("{} not found, skip".format(f_cytof_im))
             continue
-        cytof_im   = load_saved_CytofImage(os.path.join(outdir, "cytof_images", f_cytof_im)) 
+        cytof_im   = load_CytofImage(os.path.join(outdir, "cytof_images", f_cytof_im))
         df_feat    = getattr(cytof_im, n_attr)
         feats[roi] = df_feat
         
@@ -1014,9 +922,9 @@ def _gather_roi_interact(df_slide_roi, outdir, feat_name, accumul_type, interact
         if not f_cytof_im in os.listdir(os.path.join(outdir, "cytof_images")):
             print("{} not found, skip".format(f_cytof_im))
             continue
-        cytof_im   = load_saved_CytofImage(os.path.join(outdir, "cytof_images", f_cytof_im)) 
-        df_feat = getattr(cytof_im, n_attr)
-        n_cell  = len(df_feat)
+        cytof_im = load_CytofImage(os.path.join(outdir, "cytof_images", f_cytof_im))
+        df_feat  = getattr(cytof_im, n_attr)
+        n_cell   = len(df_feat)
         dist_matrix = dist.pairwise(df_feat.loc[:, ['coordinate_x', 'coordinate_y']].values)
 
         if seen_roi==0:
@@ -1155,7 +1063,7 @@ def interaction_analysis(df_slide_roi,
     return interacts, clustergrid
 
 ###########################################################
-############# phenograph clustering analysis functions #############
+######## Pheno-Graph clustering analysis functions ########
 ###########################################################
 
 def clustering_phenograph(cohort_file, outdir, normq=75, feat_comb="all", k=None, save_vis=False, pheno_markers="all"):
@@ -1171,12 +1079,19 @@ def clustering_phenograph(cohort_file, outdir, normq=75, feat_comb="all", k=None
             save_vis      = a flag indicating whether to save the visualization output (Default=False)
             pheno_markers = a list of markers used in phenograph clustering (must be a subset of cytof_img.markers)
     Outputs:
-        df_all = a dataframe of features for all cells in the cohort, with the clustering output saved in the column
+        df_all     = a dataframe of features for all cells in the cohort, with the clustering output saved in the column
         'phenotype_total{n_community}', where n_community stands for the total number of communities defined by the cohort
-        Also, each individual cytof_img class instances will be updated with 2 new attributes:
-        1)"num phenotypes ({feat_comb}_{normq}normed_{k})"
-        2)"phenotypes ({feat_comb}_{normq}normed_{k})"
+            Also, each individual cytof_img class instances will be updated with 2 new attributes:
+            1)"num phenotypes ({feat_comb}_{normq}normed_{k})"
+            2)"phenotypes ({feat_comb}_{normq}normed_{k})"
+        feat_names  = feature names (columns) used to generate PhenoGraph output
+        k           = the initial number of k used to run PhenoGraph
+        pheno_name  = the column name of the added column indicating phenograph cluster 
+        vis_savedir = the directory to save the visualization output
+        markers     = the list of markers used (minimal, for visualization purposes)
     """
+    
+    vis_savedir = ""
     feat_groups = {
         "all": ["cell_sum", "cell_ave", "cell_morphology"],
         "cell_sum": ["cell_sum", "cell_morphology"],
@@ -1195,32 +1110,21 @@ def clustering_phenograph(cohort_file, outdir, normq=75, feat_comb="all", k=None
     df_io = pd.read_csv(os.path.join(outdir, "input_output.csv"))
     df_slide_roi = pd.read_csv(cohort_file)
 
-    df_slide_roi["input_file"] = df_slide_roi[["path", "ROI"]].apply(lambda row: '/'.join(row.values.astype(str)), axis=1)
-    df_slide_roi["input_file"] = df_slide_roi["input_file"] 
-
-    '''df_info = df_slide_roi.merge(df_io, on="input_file")
-    print(df_info)
-    df_info.reset_index(drop=True, inplace=True)
-    print("after reset index")
-    print(df_info)'''
     # load all scaled feature in the cohort
     for i in df_io.index:
-    # for i in df_info.index:
-        # f_in = df_info.loc[i, "input_file"]
         f_out = df_io.loc[i, "output_file"]
         f_roi = f_out.split('/')[-1].split('.pkl')[0]
         if not os.path.isfile(f_out):
             print("{} not found, skip".format(f_out))
             continue
 
-        cytof_img = load_saved_CytofImage(f_out)
+        cytof_img = load_CytofImage(f_out)
         if i == 0:
             dict_feat = cytof_img.features
             markers   = cytof_img.markers
         cytof_ims[f_roi] = cytof_img
         dfs[f_roi] = getattr(cytof_img, n_attr)
 
-    '''feat_names = [x for y in feat_groups[feat_comb] for x in dict_feat[y]]'''
     feat_names = []
     for y in feat_groups[feat_comb]:
         if "morphology" in y:
@@ -1262,52 +1166,148 @@ def clustering_phenograph(cohort_file, outdir, normq=75, feat_comb="all", k=None
         plt.savefig(os.path.join(vis_savedir, "cluster_scatter.png"))
     plt.show()
 
-    # cohort
-    print("Showing cell clusters from phenograph clustering for the cohort")
-    for fname in feat_groups[feat_comb]:
-
-        if "morphology" in fname:
-            continue
-        if "sum" in fname:
-            accumul_type = "sum"
-        elif "ave" in fname:
-            accumul_type = "ave"
-        # print(f"Accumulation type: {accumul_type}")
-        list_features = dict_feat[fname]
-        feat_names_ = [x for x in list_features if x in feat_names]
-        
-        cell_cluster, cell_cluster_ = _vis_cell_phenotypes(df_all, communities,
-                                                           n_community, pheno_markers,
-                                                           feat_names_, accumul_type,
-                                                           savedir=vis_savedir)
-
     # attach clustering output to df_all
-    df_all[f'phenotype_total{n_community}'] = communities
-    df_all[f'phenotype_total{n_community}_projx'] = proj_2d[:,0]
-    df_all[f'phenotype_total{n_community}_projy'] = proj_2d[:,1]
+    pheno_name = f'phenotype_total{n_community}'
+    df_all[pheno_name] = communities
+    df_all['{}_projx'.format(pheno_name)] = proj_2d[:,0]
+    df_all['{}_projy'.format(pheno_name)] = proj_2d[:,1]
+    return df_all, feat_names, k, pheno_name, vis_savedir, markers
+    
+    
+def _gather_roi_pheno(df_slide_roi, df_all):
+    """Split whole df into df for each ROI"""
+    pheno_roi = {}      
+    
+    for i in df_slide_roi.index:
+        path_i = df_slide_roi.loc[i, "path"]
+        roi_i  = df_slide_roi.loc[i, "ROI"]
+        f_in  = os.path.join(path_i, roi_i)
+        cond  = df_all["filename"] == f_in
+        pheno_roi[roi_i.replace(".txt", "")] = df_all.loc[cond, :] 
+    return pheno_roi  
+    
+    
+def _vis_cell_phenotypes(df_feat, communities, n_community, markers, list_features, accumul_type="sum", savedir=None, savename=""):
+    """ Visualize cell phenotypes for a given dataframe of feature
+    Args:
+        df_feat: a dataframe of features
+        communities: a list of communities (can be a subset of the cohort communities, but should be consistent with df_feat)
+        n_community: number of communities in the cohort (n_community >= number of unique values in communities)
+        markers: a list of markers used in CyTOF image (to be present in the heatmap visualization)
+        list_features: a list of feature names (consistent with columns in df_feat)
+        accumul_type: feature aggregation type, choose from "sum" and "ave" (default="sum")
+        savedir: results saving directory. If not None, visualization plots will be saved in the desired directory (default=None)
+    Returns:
+        cell_cluster: a (N, M) matrix, where N = # of clustered communities, and M = # of markers
 
-    # split df_all to single ROIs
-    for i in df_io.index:
-        # f_in  = df_info.loc[i, "input_file"]
-        f_in  = os.path.join(df_io.loc[i,'path'], '{}.txt'.format(df_io.loc[i,'ROI']))
-        f_out = df_io.loc[i, "output_file"]
-        # f_roi = f_in.split('/')[-1].split('.txt')[0]
-        f_roi = f_out.split('/')[-1].split('.pkl')[0]
-        cond = df_all["filename"] == f_in
+        cell_cluster_norm: the normalized form of cell_cluster (normalized by subtracting the median value)
+    """
+    assert accumul_type in ["sum", "ave"], "Wrong accumulation type! Choose from 'sum' and 'ave'!"
+    cell_cluster = np.zeros((n_community, len(markers)))
+    for cluster in range(len(np.unique(communities))):
+        df_sub = df_feat[communities == cluster]
+        if df_sub.shape[0] == 0:
+            continue
+        
+        for i, feat in enumerate(list_features): # for each feature in the list of features
+            cell_cluster[cluster, i] = np.average(df_sub[feat])
+    cell_cluster_norm = cell_cluster - np.median(cell_cluster, axis=0) 
+    sns.heatmap(cell_cluster_norm, # cell_cluster - np.median(cell_cluster, axis=0),#
+                cmap='magma',
+                xticklabels=markers,
+                yticklabels=np.arange(len(np.unique(communities)))
+               )
+    plt.xlabel("Markers - {}".format(accumul_type))
+    plt.ylabel("Phenograph clusters")
+    plt.title("normalized expression - cell {}".format(accumul_type))
+    savename += "_cell_{}.png".format(accumul_type)
+    if savedir is not None:
+        if not os.path.exists(savedir):
+            os.makedirs(savedir)
+        plt.savefig(os.path.join(savedir, savename))
+    plt.show()
+    return cell_cluster, cell_cluster_norm
+    
+def vis_phenograph(df_slide_roi, df_all, pheno_name, markers, used_feat, level="cohort", accumul_type="sum", 
+                   to_save=False, savepath="./", vis_scatter=False):
+    """
+    Args:
+        df_slide_roi = a dataframe with slide-roi correspondence information included
+        df_all       = dataframe with feature and clustering results included
+        pheno_name   = name (key) of the phenograph output
+        markers      = a (minimal) list of markers used in Pheno-Graph (to visualize)
+        list_feat    = a list of features used (should be consistent with columns available in df_all)
+        level        = level to visualize, choose from "cohort", "slide", or "roi" (default="cohort")
+        accumul_type = type of feature accumulation used (default="sum")
+        to_save      = a flag indicating whether or not save output (default=False)
+        savepath     = visualization saving directory (default="./")
+    """
+    if to_save:
+        if not os.path.exists(savepath):
+            os.makedirs
+            
+    # features used for accumul_type 
+    ids       = [i for (i,x) in enumerate(used_feat) if re.search(".{}".format(accumul_type), x)]
+    list_feat = [used_feat[i] for i in ids]
 
-        if not hasattr(cytof_ims[f_roi], "phenograph"):
-            setattr(cytof_ims[f_roi], "phenograph", {})
-        cytof_ims[f_roi].phenograph[f"{feat_comb}_{normq}normed_{k}"] = {
-            "feat_name": n_attr,
-            "num_community": n_community,
-            "clusters": df_all.loc[cond, f'phenotype_total{n_community}'],
-            "proj2d_x": df_all.loc[cond, f'phenotype_total{n_community}_projx'],
-            "proj2d_y": df_all.loc[cond, f'phenotype_total{n_community}_projy']
-        }
-        # save updated CyTOF image class instances
-        pkl.dump(cytof_ims[f_roi], open(f_out, "wb"))
+    '''# features used for cell ave
+    accumul_type             = "ave"
+    ids                      = [i for (i,x) in enumerate(used_feats[key]) if re.search(".{}".format(accumul_type), x)]
+    list_feats[accumul_type] = [used_feats[key][i] for i in ids]
 
-    return df_all, feat_names, k #, cytof_ims
+    list_feat_morph = [x for x in used_feats[key] if x not in list_feats["sum"]+list_feats["ave"]]'''
+
+    if accumul_type == "sum":
+        suffix = "_cell_sum"
+    elif accumul_type == "ave":
+        suffix = "_cell_ave"
+
+    assert level in ["cohort", "slide", "roi"], "Only 'cohort', 'slide' or 'roi' levels are accepted!"
+    '''df_io = pd.read_csv(os.path.join(outdir, "input_output.csv"))'''
+    
+    n_community = len(df_all[pheno_name].unique())
+    if level == "cohort":
+        phenos = {level: df_all}
+    else:
+        phenos = _gather_roi_pheno(df_slide_roi, df_all)
+        if level == "slide":
+            for slide in df_io["Slide"].unique(): # for each slide
+                for seen_roi, roi_i in enumerate(df_slide_roi.loc[df_slide_roi["Slide"] == slide, "ROI"]):  ## for each ROI
+                    
+                    f_roi = roi_i.replace(".txt", "")
+                    if seen_roi == 0:
+                        phenos[slide] = phenos[f_roi]
+                    else:
+                        phenos[slide] = pd.concat([phenos[slide], phenos[f_roi]])
+                    phenos.pop(f_roi)
+    
+    
+    savename = ""
+    for key, df_pheno in phenos.items():
+        if to_save:
+            savepath_ = os.path.join(savepath, level)
+            savename = key
+        communities = df_pheno[pheno_name]
+        
+        _vis_cell_phenotypes(df_pheno, communities, n_community, markers, list_feat, accumul_type, 
+                             savedir=savepath_, savename=savename)
+        
+        # visualize scatter (2-d projection)
+        if vis_scatter: 
+            proj_2d = df_pheno[['{}_projx'.format(pheno_name), '{}_projy'.format(pheno_name)]].to_numpy()
+#             print("Visualization in 2d - cohort")
+            plt.figure(figsize=(4, 4))
+            plt.title("cohort")
+            sns.scatterplot(x=proj_2d[:, 0], y=proj_2d[:, 1], hue=communities, palette='tab20',
+                            #                 legend=legend,
+                            hue_order=np.arange(n_community))
+            plt.axis('tight')
+            plt.legend(bbox_to_anchor=(1.01, 1), loc=2, borderaxespad=0.)
+            if to_save:
+                plt.savefig(os.path.join(savepath_, "scatter_{}.png".format(savename)))
+            plt.show()
+    return phenos
+    
 
 import sklearn.neighbors
 from sklearn.neighbors import kneighbors_graph as skgraph
@@ -1325,7 +1325,7 @@ def _gather_roi_distances(df_slide_roi, outdir, name_pheno, thres_dist=50):
         if not f_cytof_im in os.listdir(os.path.join(outdir, "cytof_images")):
             print("{} not found, skip".format(f_cytof_im))
             continue
-        cytof_im   = load_saved_CytofImage(os.path.join(outdir, "cytof_images", f_cytof_im)) 
+        cytof_im   = load_CytofImage(os.path.join(outdir, "cytof_images", f_cytof_im))
         df_sub = cytof_im.df_feature
         dist_matrices[roi] = {}
         dist_matrices[roi]['dist'] = dist.pairwise(df_sub.loc[:, ['coordinate_x', 'coordinate_y']].values)
@@ -1365,7 +1365,7 @@ def _gather_roi_kneighbor_graphs(df_slide_roi, outdir, name_pheno, k=8):
         if not f_cytof_im in os.listdir(os.path.join(outdir, "cytof_images")):
             print("{} not found, skip".format(f_cytof_im))
             continue
-        cytof_im   = load_saved_CytofImage(os.path.join(outdir, "cytof_images", f_cytof_im)) 
+        cytof_im   = load_CytofImage(os.path.join(outdir, "cytof_images", f_cytof_im))
         df_sub = cytof_im.df_feature
         graph = skgraph(np.array(df_sub.loc[:, ['coordinate_x', 'coordinate_y']]), n_neighbors=k, mode='distance')
         graph.toarray()
