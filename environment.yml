@@ -1,0 +1,22 @@
+# run conda env create --file environment.yml
+name: image_cytof
+channels:
+  - conda-forge
+  - anaconda
+  - defaults
+dependencies:
+  - python=3.9
+  - icu
+  - numpy
+  - opencv
+  - pandas
+  - scikit-image
+  - scikit-learn
+  - scipy
+  - seaborn
+  - tqdm
+  - umap-learn
+  - yaml
+  - pip
+  - pip:
+    - phenograph
