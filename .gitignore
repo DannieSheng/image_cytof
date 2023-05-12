@@ -12,3 +12,5 @@ notebooks/.ipynb_checkpoints*
 .DS_Store
 .idea/*
 *archive*
+env/*
+env2/*
